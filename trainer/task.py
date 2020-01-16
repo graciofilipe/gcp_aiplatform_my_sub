@@ -200,6 +200,8 @@ def main_modeling_pipeline():
                                                                 epochs=TRAINING_EPOCHS,
                                                                 job_name='simple_model')
 
+    simple_model.save('gs://aiplatformfilipegracio2020/')
+
 
 if __name__ == '__main__':
     main_modeling_pipeline()
