@@ -100,20 +100,8 @@ def make_simple_feature_layer(data):
     feature_columns = []
 
     # numeric cols
-    for numeric_col in ['price', 'yearOfBirth', 'total_spend', 'median_spend', 'days_on_site']:
+    for numeric_col in ['price']:
         feature_columns.append(feature_column.numeric_column(numeric_col))
-
-    # indicator cols - onSale
-    onSale = feature_column.categorical_column_with_vocabulary_list(
-        'onSale', list(data['onSale'].unique()))
-    onSale_one_hot = feature_column.indicator_column(onSale)
-    feature_columns.append(onSale_one_hot)
-
-    # indicator cols - isFemale
-    isFemale = feature_column.categorical_column_with_vocabulary_list(
-        'isFemale', list(data['isFemale'].unique()))
-    isFemale_one_hot = feature_column.indicator_column(isFemale)
-    feature_columns.append(isFemale_one_hot)
 
     return tf.keras.layers.DenseFeatures(feature_columns)
 
@@ -125,7 +113,6 @@ def make_simple_model(feature_layer):
     :return: tensroflow model ready for fitting
     """
     model = tf.keras.Sequential([feature_layer,
-                                 layers.Dense(4, activation='relu'),
                                  layers.Dense(1, activation='sigmoid')
                                  ])
 
