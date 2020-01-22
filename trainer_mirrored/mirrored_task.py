@@ -18,7 +18,17 @@ This script fits two models to processed data, writes performance info for both 
 
 np.random.seed(111)
 
-TRAINING_EPOCHS = 66
+TF_CONFIG = os.environ.get('TF_CONFIG')
+if TF_CONFIG and '"master"' in TF_CONFIG:
+    os.environ['TF_CONFIG'] = TF_CONFIG.replace('"master"', '"chief"')
+    logging.info('changed TF_CONFIG')
+
+
+strategy = tf.distribute.experimental.MultiWorkerMirroredStrategy()
+# strategy = tf.distribute.MirroredStrategy()
+
+
+TRAINING_EPOCHS = 24
 LABEL = 'purchased'
 INPUT_FOLDER = 'processed_data'
 OUTPUT_FOLDER = 'modeling_output'
@@ -82,7 +92,7 @@ def make_tf_datasets(data_df, target_col):
     print(len(train), 'train examples')
     print(len(test), 'test examples')
 
-    batch_size = 1024
+    batch_size = 256
     train_ds = df_to_train_dataset(train, target_col, shuffle=True, batch_size=batch_size)
     val_ds = df_to_train_dataset(val, target_col, shuffle=False, batch_size=batch_size)
     test_ds = df_to_train_dataset(test, target_col, shuffle=False, batch_size=batch_size)
@@ -148,10 +158,13 @@ def model_fit_and_evaluate(model, train_ds, val_ds, test_ds,
     # to avoid overfitting stop when validation loss doesn't improve further
     early_stop = tf.keras.callbacks.EarlyStopping(
         monitor='val_loss', patience=6)
+    
     model.fit(train_ds, verbose=1, validation_data=val_ds, callbacks=[early_stop],
-              class_weight=class_weights, epochs=epochs)
+              class_weight=class_weights, epochs=epochs, steps_per_epoch=6)
+    logging.info('done fitting')
 
 
+    logging.info('going to evaluate')
     results = model.evaluate(test_ds, verbose=1)
     summary_results = {name: value for name,
                        value in zip(model.metrics_names, results)}
@@ -174,20 +187,23 @@ def main_modeling_pipeline():
     class_weights = calculate_class_weights(data_df[LABEL])
     print('class weights', class_weights)
     logging.info('Data loaded and processed')
-
     train_ds, val_ds, test_ds = make_tf_datasets(data_df, LABEL)
-
     logging.info('Tensorflow datasets created')
 
-    simple_feature_layer = make_simple_feature_layer(data_df)
-    simple_model = make_simple_model(simple_feature_layer)
+    with strategy.scope():
+        logging.info('Inside strategy')
+        simple_feature_layer = make_simple_feature_layer(data_df)
+        logging.info('Going to make model')
+        simple_model = make_simple_model(simple_feature_layer)
+
+    logging.info('Going fit model')
     simple_model_results, simple_model = model_fit_and_evaluate(model=simple_model,
-                                                                train_ds=train_ds,
-                                                                val_ds=val_ds,
-                                                                test_ds=test_ds,
-                                                                class_weights=class_weights,
-                                                                epochs=TRAINING_EPOCHS,
-                                                                job_name='simple_model')
+                                                                    train_ds=train_ds,
+                                                                    val_ds=val_ds,
+                                                                    test_ds=test_ds,
+                                                                    class_weights=class_weights,
+                                                                    epochs=TRAINING_EPOCHS,
+                                                                    job_name='simple_model')
 
     simple_model.save('gs://aiplatformfilipegracio2020/')
 

@@ -5,6 +5,8 @@ import os
 
 import numpy as np
 import pandas as pd
+from pandas.compat import StringIO
+from tensorflow.python.lib.io import file_io
 import tensorflow as tf
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import roc_auc_score
@@ -18,10 +20,11 @@ This script fits two models to processed data, writes performance info for both 
 
 np.random.seed(111)
 
-TRAINING_EPOCHS = 66
+TRAINING_EPOCHS = 11
 LABEL = 'purchased'
 INPUT_FOLDER = 'processed_data'
 OUTPUT_FOLDER = 'modeling_output'
+DATA_DIR = 'gs://aiplatformfilipegracio2020/data'
 
 
 def df_to_pred_dataset(dataframe,  batch_size=1024):
@@ -83,11 +86,21 @@ def make_tf_datasets(data_df, target_col):
     print(len(test), 'test examples')
 
     batch_size = 1024
-    train_ds = df_to_train_dataset(train, target_col, shuffle=True, batch_size=batch_size)
-    val_ds = df_to_train_dataset(val, target_col, shuffle=False, batch_size=batch_size)
-    test_ds = df_to_train_dataset(test, target_col, shuffle=False, batch_size=batch_size)
+    train_ds = df_to_train_dataset(
+        train, target_col, shuffle=True, batch_size=batch_size)
+    val_ds = df_to_train_dataset(
+        val, target_col, shuffle=False, batch_size=batch_size)
+    test_ds = df_to_train_dataset(
+        test, target_col, shuffle=False, batch_size=batch_size)
 
     return train_ds, val_ds, test_ds
+
+
+def stream_to_dataset(features_stream, labels_stream):
+    logging.info('INTO THE STREAMING FUNCTION')
+    ds = tf.data.Dataset.from_tensor_slices(
+        (dict(features_stream), labels_stream))
+    return ds
 
 
 def make_simple_feature_layer(data):
@@ -130,8 +143,7 @@ def make_simple_model(feature_layer):
     return model
 
 
-def model_fit_and_evaluate(model, train_ds, val_ds, test_ds,
-                           epochs, class_weights, job_name, model_saving=False):
+def model_fit_and_evaluate(model, train_ds, job_name, model_saving=False):
     """
     fits the model, saves it, and returns model performance info
     :param model: tensorflow model to train
@@ -146,50 +158,55 @@ def model_fit_and_evaluate(model, train_ds, val_ds, test_ds,
     """
 
     # to avoid overfitting stop when validation loss doesn't improve further
-    early_stop = tf.keras.callbacks.EarlyStopping(
-        monitor='val_loss', patience=6)
-    model.fit(train_ds, verbose=1, validation_data=val_ds, callbacks=[early_stop],
-              class_weight=class_weights, epochs=epochs)
+    # early_stop = tf.keras.callbacks.EarlyStopping(
+    #     monitor='val_loss', patience=6)
+    model.fit(train_ds, verbose=1, epochs=epochs)
+
+    return model
 
 
-    results = model.evaluate(test_ds, verbose=1)
-    summary_results = {name: value for name,
-                       value in zip(model.metrics_names, results)}
-    summary_results['job_name'] = job_name
-    summary_results['completion_time'] = datetime.datetime.now().strftime(
-        '%Y-%m-%d_%H:%M:%S')
-    return summary_results, model
+def get_data():
+    # Access iris data from Cloud Storage
+    logging.info('GETTING THE FEATURES DATA')
+    features_filesteam = file_io.FileIO(os.path.join(DATA_DIR, 'price.csv'),
+                                        mode='r')
+    features = pd.read_csv(
+        StringIO(features_filesteam.read())).values
 
+    logging.info('GETTING THE LABELS DATA')
+    target_filestream = file_io.FileIO(os.path.join(DATA_DIR, 'target.csv'),
+                                       mode='r')
+    target = pd.read_csv(StringIO(target_filestream.read())).values
+    target = target.reshape((target.size,))
+
+    logging.info('FINISHING THE DATA')
+
+    return target, features
 
 
 def main_modeling_pipeline():
     """
     runs the full modeling pipeline
     """
+    logging.info('STARTING THE MAIN')
 
-
-    data_df = pd.read_csv('gs://aiplatformfilipegracio2020/head_train_data.csv')
-    data_df = data_df[[LABEL, 'price', 'days_on_site']]
-
-    class_weights = calculate_class_weights(data_df[LABEL])
-    print('class weights', class_weights)
+    # getdata
+    target, features = get_data()
     logging.info('Data loaded and processed')
 
-    train_ds, val_ds, test_ds = make_tf_datasets(data_df, LABEL)
-
+    ds = stream_to_dataset(features_stream=features, labels_stream=target)
     logging.info('Tensorflow datasets created')
 
     simple_feature_layer = make_simple_feature_layer(data_df)
     simple_model = make_simple_model(simple_feature_layer)
     simple_model_results, simple_model = model_fit_and_evaluate(model=simple_model,
                                                                 train_ds=train_ds,
-                                                                val_ds=val_ds,
-                                                                test_ds=test_ds,
-                                                                class_weights=class_weights,
                                                                 epochs=TRAINING_EPOCHS,
                                                                 job_name='simple_model')
 
     simple_model.save('gs://aiplatformfilipegracio2020/')
+    iris_data_filesteam.close()
+    target_filestream.close()
 
 
 if __name__ == '__main__':
