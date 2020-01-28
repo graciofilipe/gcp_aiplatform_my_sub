@@ -1,7 +1,7 @@
 from setuptools import find_packages, setup
 
 REQUIRED_PACKAGES = ["numpy", "pandas", "scikit-learn",
-                     "tensorboard==2.0.2", "tensorflow==2.0.0",
+                     "tensorboard==2.0.2", "tensorflow==2.0.1",
                      "tensorflow-estimator==2.0.1", "gcsfs"]
 
 setup(name="trainer_mirrored",
